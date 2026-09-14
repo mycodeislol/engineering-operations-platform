@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: engineering-operations-platform
+  datasource:
+    url: jdbc:postgresql://localhost:5432/eop_db
+    username: eop_user
+    password: eop_password
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+eop:
+  instance-id: eop-local-dev-01
+  environment: local
+  database:
+    url: jdbc:postgresql://localhost:5432/eop_db
+    username: eop_user
+    password: eop_password
+    max-pool-size: 10
+    connection-timeout-ms: 30000
+    auto-migrate: true
+  security:
+    jwt-secret: eop-dev-super-secure-jwt-signing-key-32-chars-minimum-length
+    jwt-issuer: eop-platform
+    token-validity-seconds: 3600
+    refresh-token-validity-seconds: 86400
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer-group-id: eop-operations-group
+    producer-retries: 3
+    request-timeout-ms: 5000
+  features:
+    auto-incident-creation-enabled: true
+    rag-knowledge-enabled: true
+    kafka-distribution-enabled: false
+  ai:
+    model: text-embedding-004
+    embedding-model: text-embedding-004
+    vector-dimensions: 1536
+    request-timeout-ms: 10000
+    pgvector-enabled: true
