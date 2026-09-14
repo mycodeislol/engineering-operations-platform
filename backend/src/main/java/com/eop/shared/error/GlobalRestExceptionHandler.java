@@ -116,6 +116,46 @@ public class GlobalRestExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
     }
 
+    @ExceptionHandler(org.springframework.web.bind.MissingServletRequestParameterException.class)
+    public ResponseEntity<ProblemDetail> handleMissingParams(org.springframework.web.bind.MissingServletRequestParameterException ex, HttpServletRequest request) {
+        log.warn("Missing parameter [{}] at path: [{}]", ex.getParameterName(), request.getRequestURI());
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Missing Required Parameter");
+        problem.setType(URI.create("https://eop.dev/errors/missing-parameter"));
+        problem.setProperty("parameterName", ex.getParameterName());
+        problem.setProperty("timestamp", Instant.now());
+        problem.setProperty("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    @ExceptionHandler(jakarta.validation.ConstraintViolationException.class)
+    public ResponseEntity<ProblemDetail> handleConstraintViolation(jakarta.validation.ConstraintViolationException ex, HttpServletRequest request) {
+        log.warn("Constraint violation at path: [{}]", request.getRequestURI());
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Validation Failed");
+        problem.setType(URI.create("https://eop.dev/errors/validation-failed"));
+        problem.setProperty("timestamp", Instant.now());
+        problem.setProperty("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    @ExceptionHandler(org.springframework.web.method.annotation.HandlerMethodValidationException.class)
+    public ResponseEntity<ProblemDetail> handleMethodValidation(org.springframework.web.method.annotation.HandlerMethodValidationException ex, HttpServletRequest request) {
+        log.warn("Method validation failed at path: [{}]", request.getRequestURI());
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Validation failed for request parameters");
+        problem.setTitle("Validation Failed");
+        problem.setType(URI.create("https://eop.dev/errors/validation-failed"));
+        problem.setProperty("timestamp", Instant.now());
+        problem.setProperty("path", request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetail> handleUnhandledException(Exception ex, HttpServletRequest request) {
         log.error("Unhandled internal server exception caught at: [{}]", request.getRequestURI(), ex);
