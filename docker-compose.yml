@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: eop_user
+      POSTGRES_PASSWORD: eop_password
+      POSTGRES_DB: eop_db
+    ports:
+      - "5432:5432"
