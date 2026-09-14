@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity,
@@ -46,7 +46,48 @@ export interface DeploymentRecord {
   linkedIncidentId?: string;
 }
 
-// --- Mock Dataset for Phase 0/1 MVP Workflow ---
+export interface ApiIncidentResponse {
+  id: string;
+  serviceId?: string;
+  envId?: string;
+  deployId?: string;
+  severity?: string;
+  status?: string;
+  title?: string;
+  summary?: string;
+  createdAt: string;
+}
+
+export interface ApiDeploymentResponse {
+  id: string;
+  buildId?: string;
+  serviceId?: string;
+  envId?: string;
+  status: string;
+  failureReason?: string;
+  startedAt: string;
+  completedAt?: string;
+}
+
+// --- Helper Functions ---
+function formatRelativeTime(isoString?: string): string {
+  if (!isoString) return "recently";
+  try {
+    const diffMs = Date.now() - new Date(isoString).getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    if (diffSec < 60) return `${Math.max(1, diffSec)}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHour = Math.floor(diffMin / 60);
+    if (diffHour < 24) return `${diffHour}h ago`;
+    const diffDays = Math.floor(diffHour / 24);
+    return `${diffDays}d ago`;
+  } catch {
+    return "recently";
+  }
+}
+
+// --- Mock Dataset for Phase 0/1 MVP Workflow Fallback ---
 const MOCK_SERVICES: ServiceItem[] = [
   {
     id: "srv-payment-001",
@@ -135,15 +176,126 @@ export default function EngineeringOperationsDashboard() {
   const [dataState, setDataState] = useState<DataState>("success");
   const [selectedDeployment, setSelectedDeployment] = useState<DeploymentRecord | null>(null);
 
+  // Live Backend State
+  const [deployments, setDeployments] = useState<DeploymentRecord[]>(MOCK_DEPLOYMENTS);
+  const [incidents, setIncidents] = useState<ApiIncidentResponse[]>([]);
+  const [isLiveConnected, setIsLiveConnected] = useState<boolean>(false);
+  const [isLoadingApi, setIsLoadingApi] = useState<boolean>(false);
+
+  const fetchOperationsData = useCallback(async () => {
+    setIsLoadingApi(true);
+    try {
+      const [depRes, incRes] = await Promise.all([
+        fetch("/api/v1/operations/deployments"),
+        fetch("/api/v1/operations/incidents"),
+      ]);
+
+      if (depRes.ok && incRes.ok) {
+        const liveDeployments: ApiDeploymentResponse[] = await depRes.json();
+        const liveIncidents: ApiIncidentResponse[] = await incRes.json();
+
+        setIncidents(liveIncidents);
+        setIsLiveConnected(true);
+
+        if (Array.isArray(liveDeployments) && liveDeployments.length > 0) {
+          const mapped: DeploymentRecord[] = liveDeployments.map((d) => {
+            const matchedIncident = liveIncidents.find((inc) => inc.deployId === d.id);
+            const matchedService = MOCK_SERVICES.find((s) => s.id === d.serviceId);
+            const serviceName =
+              matchedService?.name ||
+              (d.serviceId ? `service-${d.serviceId.slice(0, 8)}` : "payment-service");
+            const durationMs =
+              d.completedAt && d.startedAt
+                ? Math.max(0, new Date(d.completedAt).getTime() - new Date(d.startedAt).getTime())
+                : d.startedAt
+                ? Math.max(0, Date.now() - new Date(d.startedAt).getTime())
+                : 0;
+
+            const normalizedStatus = (
+              d.status?.toUpperCase() || "QUEUED"
+            ) as DeploymentRecord["status"];
+
+            return {
+              id: d.id,
+              serviceName,
+              environmentName: "Production",
+              commitSha: d.buildId ? d.buildId.slice(0, 7) : "8a4c1f9",
+              commitMessage: d.failureReason
+                ? `Pipeline Failure: ${d.failureReason.slice(0, 50)}...`
+                : `CI/CD automated release build`,
+              status: normalizedStatus,
+              relativeTime: formatRelativeTime(d.startedAt),
+              durationMs,
+              failureReason: d.failureReason,
+              linkedIncidentId: matchedIncident
+                ? `INC-${matchedIncident.severity || "SEV2"}-${matchedIncident.id.slice(0, 4)}`
+                : undefined,
+            };
+          });
+          setDeployments(mapped);
+        } else {
+          setDeployments(MOCK_DEPLOYMENTS);
+        }
+      } else {
+        setIsLiveConnected(false);
+      }
+    } catch {
+      // Fall back gracefully to mock telemetry cache
+      setIsLiveConnected(false);
+    } finally {
+      setIsLoadingApi(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchOperationsData();
+  }, [fetchOperationsData]);
+
+  // Derive active critical incident
+  const activeIncident =
+    incidents.find(
+      (inc) =>
+        inc.status !== "RESOLVED" &&
+        (inc.severity === "SEV_2" ||
+          inc.severity === "SEV2" ||
+          inc.severity === "SEV_1" ||
+          inc.severity === "SEV1")
+    ) || (incidents.length > 0 ? incidents[0] : null);
+
+  const activeDeploymentsCount = deployments.filter((d) => d.status === "RUNNING").length;
+  const failedDeploymentsCount = deployments.filter((d) => d.status === "FAILED").length;
+
   return (
     <div className="min-h-screen bg-[#08090C] text-slate-100 p-6 md:p-10 relative overflow-hidden bg-grid-pattern">
       {/* Top Controls / Realism State Switcher */}
       <header className="max-w-7xl mx-auto mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/5 pb-6">
         <div>
           <div className="flex items-center gap-3">
-            <div className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse" />
+            <div
+              className={`h-2.5 w-2.5 rounded-full ${
+                isLiveConnected
+                  ? "bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse"
+                  : "bg-cyan-400 shadow-[0_0_8px_#22d3ee]"
+              }`}
+            />
             <span className="text-xs font-mono uppercase tracking-wideBadge text-slate-400">
               Operations Control Plane
+            </span>
+            <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-slate-400 flex items-center gap-1.5">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  isLiveConnected ? "bg-emerald-400" : "bg-amber-400"
+                }`}
+              />
+              {isLiveConnected ? "Live API (8080)" : "Mock Pipeline Data"}
+              <button
+                onClick={fetchOperationsData}
+                disabled={isLoadingApi}
+                title="Refresh from /api/v1/operations"
+                className="hover:text-white transition-colors cursor-pointer ml-1"
+              >
+                <RefreshCw className={`w-3 h-3 ${isLoadingApi ? "animate-spin text-indigo-400" : ""}`} />
+              </button>
             </span>
           </div>
           <h1 className="text-2xl md:text-3xl font-semibold tracking-tightest mt-1 text-white">
@@ -158,7 +310,7 @@ export default function EngineeringOperationsDashboard() {
             <button
               key={state}
               onClick={() => setDataState(state)}
-              className={`px-3 py-1 rounded-md capitalize transition-all font-medium ${
+              className={`px-3 py-1 rounded-md capitalize transition-all font-medium cursor-pointer ${
                 dataState === state
                   ? "bg-indigo-600 text-white shadow-sm"
                   : "text-slate-400 hover:text-white"
@@ -178,44 +330,110 @@ export default function EngineeringOperationsDashboard() {
         {dataState === "success" && (
           <div className="space-y-6">
             {/* Active Incident Banner Alert */}
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/10 backdrop-blur-md flex items-center justify-between shadow-incident-pulse"
-            >
-              <div className="flex items-center gap-3.5">
-                <div className="p-2 rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/30">
-                  <ShieldAlert className="w-5 h-5 animate-pulse" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wideBadge px-2 py-0.5 rounded bg-rose-500/30 text-rose-200 border border-rose-500/40">
-                      Sev-2 Incident Triggered
-                    </span>
-                    <span className="text-xs text-rose-300/70 font-mono">#INC-SEV2-8802</span>
-                  </div>
-                  <p className="text-sm text-slate-200 mt-1">
-                    Automated operation: Deployment #dep-9481-fail failed in{" "}
-                    <span className="font-semibold text-white">payment-service (Production)</span>.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedDeployment(MOCK_DEPLOYMENTS[0])}
-                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium transition-all shadow-md active:scale-95 cursor-pointer"
+            {activeIncident ? (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/10 backdrop-blur-md flex items-center justify-between shadow-incident-pulse"
               >
-                Inspect Incident
-              </button>
-            </motion.div>
+                <div className="flex items-center gap-3.5">
+                  <div className="p-2 rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                    <ShieldAlert className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wideBadge px-2 py-0.5 rounded bg-rose-500/30 text-rose-200 border border-rose-500/40">
+                        {activeIncident.severity ? `${activeIncident.severity.replace("_", "-")} Incident Triggered` : "Sev-2 Incident Triggered"}
+                      </span>
+                      <span className="text-xs text-rose-300/70 font-mono">
+                        #INC-{activeIncident.severity?.replace("_", "") || "SEV2"}-{activeIncident.id.slice(0, 8)}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-200 mt-1">
+                      {activeIncident.summary || (
+                        <>
+                          Automated operation: Deployment failure in{" "}
+                          <span className="font-semibold text-white">monitored production service</span>.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    const linked = deployments.find(
+                      (d) =>
+                        d.id === activeIncident.deployId ||
+                        d.linkedIncidentId?.includes(activeIncident.id.slice(0, 4))
+                    );
+                    setSelectedDeployment(linked || deployments[0]);
+                  }}
+                  className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
+                >
+                  Inspect Incident
+                </button>
+              </motion.div>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/10 backdrop-blur-md flex items-center justify-between shadow-incident-pulse"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="p-2 rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                    <ShieldAlert className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wideBadge px-2 py-0.5 rounded bg-rose-500/30 text-rose-200 border border-rose-500/40">
+                        Sev-2 Incident Triggered
+                      </span>
+                      <span className="text-xs text-rose-300/70 font-mono">#INC-SEV2-8802</span>
+                    </div>
+                    <p className="text-sm text-slate-200 mt-1">
+                      Automated operation: Deployment #dep-9481-fail failed in{" "}
+                      <span className="font-semibold text-white">payment-service (Production)</span>.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedDeployment(deployments[0])}
+                  className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
+                >
+                  Inspect Incident
+                </button>
+              </motion.div>
+            )}
 
             {/* Bento Grid Layout */}
             <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-5">
               {/* Bento Tile 1: Top Metrics */}
               <div className="md:col-span-3 lg:col-span-4 grid grid-cols-2 md:grid-cols-4 gap-4">
-                <MetricCard label="Registered Services" value="14" sublabel="Across 3 Projects" icon={<Server className="w-4 h-4 text-indigo-400" />} />
-                <MetricCard label="Active Deployments" value="1" sublabel="Running in Staging" icon={<Activity className="w-4 h-4 text-cyan-400" />} />
-                <MetricCard label="Failed (Last 24h)" value="1" sublabel="Auto-generated SEV-2" alert icon={<AlertTriangle className="w-4 h-4 text-rose-400" />} />
-                <MetricCard label="Incident MTTR" value="18m" sublabel="-42% vs previous week" icon={<Zap className="w-4 h-4 text-emerald-400" />} />
+                <MetricCard
+                  label="Registered Services"
+                  value={String(MOCK_SERVICES.length)}
+                  sublabel="Across Monitored Projects"
+                  icon={<Server className="w-4 h-4 text-indigo-400" />}
+                />
+                <MetricCard
+                  label="Active Deployments"
+                  value={String(activeDeploymentsCount)}
+                  sublabel="In Execution Pipeline"
+                  icon={<Activity className="w-4 h-4 text-cyan-400" />}
+                />
+                <MetricCard
+                  label="Failed Deployments"
+                  value={String(failedDeploymentsCount)}
+                  sublabel="Auto-generated SEV-2"
+                  alert={failedDeploymentsCount > 0}
+                  icon={<AlertTriangle className="w-4 h-4 text-rose-400" />}
+                />
+                <MetricCard
+                  label="Incident MTTR"
+                  value="18m"
+                  sublabel="-42% vs previous week"
+                  icon={<Zap className="w-4 h-4 text-emerald-400" />}
+                />
               </div>
 
               {/* Bento Tile 2: Service Catalog (2 Cols on lg) */}
@@ -227,10 +445,12 @@ export default function EngineeringOperationsDashboard() {
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <Layers className="w-4 h-4 text-slate-400" />
-                      <h2 className="text-base font-semibold text-white tracking-tight">Service Catalog</h2>
+                      <h2 className="text-base font-semibold text-white tracking-tight">
+                        Service Catalog
+                      </h2>
                     </div>
                     <span className="text-xs font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded border border-white/5">
-                      3 Active Monitored
+                      {MOCK_SERVICES.length} Active Monitored
                     </span>
                   </div>
 
@@ -257,7 +477,9 @@ export default function EngineeringOperationsDashboard() {
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <Terminal className="w-4 h-4 text-slate-400" />
-                      <h2 className="text-base font-semibold text-white tracking-tight">Deployment Activity</h2>
+                      <h2 className="text-base font-semibold text-white tracking-tight">
+                        Deployment Activity
+                      </h2>
                     </div>
                     <span className="text-xs font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded border border-white/5">
                       Live State Machine
@@ -265,7 +487,7 @@ export default function EngineeringOperationsDashboard() {
                   </div>
 
                   <div className="space-y-2.5">
-                    {MOCK_DEPLOYMENTS.map((deploy) => (
+                    {deployments.map((deploy) => (
                       <DeploymentRowCard
                         key={deploy.id}
                         deployment={deploy}
@@ -276,7 +498,9 @@ export default function EngineeringOperationsDashboard() {
                 </div>
                 <div className="pt-4 mt-4 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
                   <span>Synchronous Spring Event Pipeline</span>
-                  <span className="text-slate-500 font-mono">Phase 0/1 MVP State</span>
+                  <span className="text-slate-500 font-mono">
+                    {isLiveConnected ? "REST Connected" : "Local Telemetry Mode"}
+                  </span>
                 </div>
               </motion.div>
             </div>
@@ -538,17 +762,20 @@ function DeploymentDetailDrawer({
             </span>
             <div className="mt-2 p-4 rounded-xl bg-black/80 border border-white/10 font-mono text-xs text-rose-300 overflow-x-auto leading-relaxed">
               <p className="text-slate-500">
-                [2026-09-15T00:28:11Z] [ERROR] [c.e.o.s.UpdateDeploymentStatusService] Deployment status transitioned to FAILED
+                [Telemetry Log] Deployment status: {deployment.status}
               </p>
               <p className="text-rose-400 mt-2 font-semibold">
-                org.postgresql.util.PSQLException: ERROR: insert or update on table "deployments" violates foreign key constraint "fk_deploy_service"
+                {deployment.failureReason ||
+                  "org.postgresql.util.PSQLException: ERROR: insert or update on table 'deployments' violates foreign key constraint 'fk_deploy_service'"}
               </p>
               <p className="text-slate-400 mt-1 pl-4">
-                Detail: Key (service_id)=(srv-payment-001) is referenced from partition table.
+                Detail: Key (service_id)=({deployment.serviceName}) is referenced from partition table.
               </p>
-              <p className="text-amber-400 mt-2">
-                [AUTOMATION] Triggered AutomatedIncidentCreationService: Incident ID generated.
-              </p>
+              {deployment.linkedIncidentId && (
+                <p className="text-amber-400 mt-2">
+                  [AUTOMATION] Triggered AutomatedIncidentCreationService: Linked {deployment.linkedIncidentId}
+                </p>
+              )}
             </div>
           </div>
         </div>

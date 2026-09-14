@@ -14,11 +14,7 @@ public record IncidentQueryCriteria(
         IncidentStatus status
 ) {
     public IncidentQueryCriteria {
-        Objects.requireNonNull(serviceId, "serviceId cannot be null");
-        Objects.requireNonNull(envId, "envId cannot be null");
-        if (severities == null || severities.isEmpty()) {
-            severities = List.of(IncidentSeverity.SEV_2, IncidentSeverity.SEV_3);
-        } else {
+        if (severities != null && !severities.isEmpty()) {
             severities = List.copyOf(severities);
         }
     }

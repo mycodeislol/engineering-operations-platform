@@ -1,5 +1,6 @@
 package com.eop.operations.infrastructure.web;
 
+import com.eop.operations.application.GetIncidentsService;
 import com.eop.operations.infrastructure.web.dto.IncidentResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -9,10 +10,14 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/operations/incidents")
+@CrossOrigin(origins = "*")
 public class IncidentController {
 
-    // TODO: Wire application query use case port here
-    public IncidentController() {}
+    private final GetIncidentsService getIncidentsService;
+
+    public IncidentController(GetIncidentsService getIncidentsService) {
+        this.getIncidentsService = getIncidentsService;
+    }
 
     @GetMapping
     public ResponseEntity<List<IncidentResponse>> getIncidents(
@@ -20,7 +25,6 @@ public class IncidentController {
             @RequestParam(required = false) UUID envId,
             @RequestParam(required = false) String severity) {
         
-        // Placeholder returning filtered/empty collection bound to hexagonal contract
-        return ResponseEntity.ok(List.of());
+        return ResponseEntity.ok(getIncidentsService.execute(serviceId, envId, severity));
     }
 }

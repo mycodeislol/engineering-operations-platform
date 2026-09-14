@@ -1,6 +1,8 @@
 package com.eop.operations.infrastructure.web;
 
+import com.eop.operations.application.GetDeploymentsService;
 import com.eop.operations.application.UpdateDeploymentStatusService;
+import com.eop.operations.infrastructure.web.dto.DeploymentResponse;
 import com.eop.operations.infrastructure.web.dto.UpdateDeploymentStatusRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -11,12 +13,16 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -33,6 +39,32 @@ class DeploymentControllerTest {
 
     @MockitoBean
     private UpdateDeploymentStatusService updateStatusService;
+
+    @MockitoBean
+    private GetDeploymentsService getDeploymentsService;
+
+    @Test
+    void getDeployments_returnsList() throws Exception {
+        UUID depId = UUID.randomUUID();
+        when(getDeploymentsService.execute()).thenReturn(List.of(
+                new DeploymentResponse(
+                        depId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        "RUNNING",
+                        null,
+                        Instant.now(),
+                        null
+                )
+        ));
+
+        mockMvc.perform(get("/api/v1/operations/deployments")
+                .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(depId.toString()))
+                .andExpect(jsonPath("$[0].status").value("RUNNING"));
+    }
 
     @Test
     void updateStatus_validRequest_returnsNoContent() throws Exception {
